@@ -24,7 +24,7 @@ void ParticleFilter::init(double x, double y, double theta, double std[]) {
   //   x, y, theta and their uncertainties from GPS) and all weights to 1. 
   // Add random Gaussian noise to each particle.
   // NOTE: Consult particle_filter.h for more information about this method (and others in this file).
-  num_particles = 75;
+  num_particles = 25;
 
   normal_distribution<double> dist_x(x, std[0]);
   normal_distribution<double> dist_y(y, std[1]);
@@ -40,6 +40,7 @@ void ParticleFilter::init(double x, double y, double theta, double std[]) {
     particles[i].weight = 1.0;
   }
 
+  weights = vector<double>(num_particles, 1.0);
   is_initialized = true;
 }
 
@@ -106,10 +107,6 @@ void ParticleFilter::updateWeights(double sensor_range, double std_landmark[],
   //   3.33
   //   http://planning.cs.uiuc.edu/node99.html
 
-  // for each particle, convert all observations around it into map coordinates
-  // compute weights for each observations and multiply them
-  // 
-  // for each observation, convert into map coordinate system.
   for (Particle& particle : particles) {
 
     // convert from vehicle to map coordinates
@@ -136,12 +133,18 @@ void ParticleFilter::updateWeights(double sensor_range, double std_landmark[],
     const double std_y = std_landmark[1];
     const double PI = 2 * acos(0.0);
     const double normalizer = 1.0 / (2 * PI * std_x * std_y);
+
+    particle.weight = 1.0;
     for (LandmarkObs& obs : obs_to_map_coords) {
-      const double dist_x = particle.x - map_landmarks.landmark_list[obs.id].x_f;
-      const double dist_y = particle.y - map_landmarks.landmark_list[obs.id].y_f;
+      const double dist_x = obs.x - landmarks_in_range[obs.id].x;
+      const double dist_y = obs.y - landmarks_in_range[obs.id].y;
       const double weight = normalizer * exp(-((dist_x*dist_x)/(2*std_x*std_x) + (dist_y*dist_y)/(2*std_y*std_y)));
       particle.weight *= weight;
     }
+  }
+
+  for (int i = 0; i < num_particles; i++) {
+    weights[i] = particles[i].weight;
   }
 }
 
