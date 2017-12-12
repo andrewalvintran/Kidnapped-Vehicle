@@ -53,15 +53,20 @@ void ParticleFilter::prediction(double delta_t, double std_pos[], double velocit
   normal_distribution<double> noise_y(0, std_pos[1]);
   normal_distribution<double> noise_theta(0, std_pos[2]);
 
-  const double velocity_over_yaw = velocity / yaw_rate;
   const double yaw_times_delta = yaw_rate * delta_t;
 
   for (Particle& particle : particles) {
-    particle.x += velocity_over_yaw
-      * (sin(particle.theta + yaw_times_delta) - sin(particle.theta));
-    particle.y += velocity_over_yaw 
-      * (cos(particle.theta) - cos(particle.theta + yaw_times_delta));
-    particle.theta += yaw_times_delta;
+    if (yaw_rate == 0) {
+      particle.x += velocity * cos(particle.theta) * delta_t;
+      particle.y += velocity * sin(particle.theta) * delta_t;
+    } else {
+      const double velocity_over_yaw = velocity / yaw_rate;
+      particle.x += velocity_over_yaw
+        * (sin(particle.theta + yaw_times_delta) - sin(particle.theta));
+      particle.y += velocity_over_yaw 
+        * (cos(particle.theta) - cos(particle.theta + yaw_times_delta));
+      particle.theta += yaw_times_delta;
+    }
 
     // Adding Gaussian noise
     particle.x += noise_x(gen);
@@ -75,7 +80,17 @@ void ParticleFilter::dataAssociation(std::vector<LandmarkObs> predicted, std::ve
   //   observed measurement to this particular landmark.
   // NOTE: this method will NOT be called by the grading code. But you will probably find it useful to 
   //   implement this method and use it as a helper during the updateWeights phase.
-
+  
+  for (LandmarkObs& observation : observations) {
+    double closest_distance = numeric_limits<double>::max();
+    for (int i = 0; i < predicted.size(); i++) {
+      const double distance = dist(predicted[i].x, predicted[i].y, observation.x, observation.y);
+      if (distance < closest_distance) {
+        closest_distance = distance;
+        observation.id = i;
+      }
+    }
+  }
 }
 
 void ParticleFilter::updateWeights(double sensor_range, double std_landmark[], 
@@ -90,6 +105,44 @@ void ParticleFilter::updateWeights(double sensor_range, double std_landmark[],
   //   and the following is a good resource for the actual equation to implement (look at equation 
   //   3.33
   //   http://planning.cs.uiuc.edu/node99.html
+
+  // for each particle, convert all observations around it into map coordinates
+  // compute weights for each observations and multiply them
+  // 
+  // for each observation, convert into map coordinate system.
+  for (Particle& particle : particles) {
+
+    // convert from vehicle to map coordinates
+    vector<LandmarkObs> obs_to_map_coords;
+    for (const LandmarkObs& obs : observations) {
+      double map_x = particle.x + cos(particle.theta)*obs.x - sin(particle.theta)*obs.y;
+      double map_y = particle.y + sin(particle.theta)*obs.x + cos(particle.theta)*obs.y;
+      obs_to_map_coords.push_back({obs.id, map_x, map_y});
+    }
+
+    // Find landmarks in range of the particle
+    vector<LandmarkObs> landmarks_in_range;
+    for (auto& possible_landmark : map_landmarks.landmark_list) {
+      double distance = dist(particle.x, particle.y, possible_landmark.x_f, possible_landmark.y_f);
+      if (distance <= sensor_range) {
+        landmarks_in_range.push_back({possible_landmark.id_i, possible_landmark.x_f, possible_landmark.y_f});
+      }
+    }
+
+    dataAssociation(landmarks_in_range, obs_to_map_coords);
+
+    // Compute weights
+    const double std_x = std_landmark[0];
+    const double std_y = std_landmark[1];
+    const double PI = 2 * acos(0.0);
+    const double normalizer = 1.0 / (2 * PI * std_x * std_y);
+    for (LandmarkObs& obs : obs_to_map_coords) {
+      const double dist_x = particle.x - map_landmarks.landmark_list[obs.id].x_f;
+      const double dist_y = particle.y - map_landmarks.landmark_list[obs.id].y_f;
+      const double weight = normalizer * exp(-((dist_x*dist_x)/(2*std_x*std_x) + (dist_y*dist_y)/(2*std_y*std_y)));
+      particle.weight *= weight;
+    }
+  }
 }
 
 void ParticleFilter::resample() {
